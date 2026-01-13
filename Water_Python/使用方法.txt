@@ -1,0 +1,4 @@
+先将测试结果填写在shuizhi.xlsx中
+使用vscode运行new.py生成神经网络参数
+使用export_to_c.py生成model_data.h文件
+将model_data.h一致到水质检测的工程文件中
