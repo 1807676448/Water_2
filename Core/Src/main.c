@@ -199,16 +199,15 @@ int main(void)
 
     // HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
     // HAL_Delay(400);
-    if (TestStart == 1)
+    // if (TestStart == 1)
+    // {
+    //   BoomTest(0, 0);
+    //   TestStart = 0;
+    //   HAL_Delay(200);
+    // }
+    if (HAL_GetTick() - tick_counter > 10000)
     {
       BoomTest(0, 0);
-      TestStart = 0;
-      HAL_Delay(200);
-    }
-    else if (HAL_GetTick() - tick_counter > 10000)
-    {
-      BoomTest(0, 0);
-      TestStart = 0;
       tick_counter = HAL_GetTick();
       HAL_Delay(200);
     }
@@ -223,8 +222,11 @@ int main(void)
                          COMM_DEVICE_ID, "Active");
 
       HAL_UART_Transmit(&huart3, (uint8_t *)tx_buffer_1, len, 1000);
+      HAL_Delay(100);
     }
-    HAL_Delay(10);
+    printf("%u\r\n", (unsigned int)tick_counter);
+    BoardLedTest();
+    HAL_Delay(200);
   }
   /* USER CODE END 3 */
 }

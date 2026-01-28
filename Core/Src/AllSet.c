@@ -22,7 +22,7 @@ void BoomTest(float* out_cod, float* out_uv254)
     int Led_550_int = 0;
     int Led_254_int = 0;
 
-    float Tem;
+    float Tem = 0.0f;
 
     HAL_GPIO_WritePin(Boom_GPIO_Port, Boom_Pin, GPIO_PIN_SET);
     HAL_Delay(4000);
