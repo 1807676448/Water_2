@@ -33,6 +33,7 @@
 #include "AllSet.h"
 #include "ADS1220.h"
 #include "water_quality_ai.h"
+#include "cJSON.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -97,6 +98,9 @@ uint8_t usart3_rx_complete = 0;
 uint8_t usart1_rx_buffer[1];
 
 uint8_t TestStart = 0;
+
+uint64_t tick_counter = 0;
+uint64_t tick_heart = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -180,6 +184,9 @@ int main(void)
   HAL_UART_Receive_IT(&huart1, &usart1_rx_buffer[0], 1);
 
   HAL_GPIO_WritePin(GPIOA, LED_Pin, 0);
+
+  tick_counter = HAL_GetTick();
+  tick_heart = HAL_GetTick();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -197,6 +204,25 @@ int main(void)
       BoomTest(0, 0);
       TestStart = 0;
       HAL_Delay(200);
+    }
+    else if (HAL_GetTick() - tick_counter > 10000)
+    {
+      BoomTest(0, 0);
+      TestStart = 0;
+      tick_counter = HAL_GetTick();
+      HAL_Delay(200);
+    }
+
+    if (HAL_GetTick() - tick_heart > 1000)
+    {
+      tick_heart = HAL_GetTick();
+      char tx_buffer_1[80];
+
+      int len = snprintf(tx_buffer_1, sizeof(tx_buffer_1),
+                         "{\"device_id\":%d,\"status\":\"%s\"}\r\n",
+                         COMM_DEVICE_ID, "Active");
+
+      HAL_UART_Transmit(&huart3, (uint8_t *)tx_buffer_1, len, 1000);
     }
     HAL_Delay(10);
   }

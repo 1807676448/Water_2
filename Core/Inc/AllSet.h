@@ -16,6 +16,12 @@
 #define BoomTime 1000
 #define BoardLedTime 300
 
+// ================== 配置宏定义 ==================
+#define COMM_DEVICE_ID      2           // 设备ID
+#define COMM_UART_HANDLE    &huart2     // 通信使用的串口句柄
+#define COMM_RX_BUFFER_SIZE 256         // 接收缓冲区大小
+
+
 void LedTest(void);
 void BoomTest(float* out_cod, float* out_uv254);
 void BoardLedTest(void);

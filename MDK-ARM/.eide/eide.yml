@@ -34,6 +34,7 @@ virtualFolder:
                 - path: ../Core/Src/system_stm32g4xx.c
                 - path: ../Core/Src/ADS1220.c
                 - path: ../Core/Src/water_quality_ai.c
+                - path: ../Core/Src/cJSON.c
               folders: []
     - name: Drivers
       files: []

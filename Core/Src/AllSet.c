@@ -54,8 +54,8 @@ void BoomTest(float* out_cod, float* out_uv254)
     // 构建并发送 JSON 格式结果到 USART3
     char tx_buffer[256];
     int len = snprintf(tx_buffer, sizeof(tx_buffer), 
-        "{\"Led_550\": %.6f, \"Led_254\": %.6f, \"Temp\": %.4f, \"COD\": %.4f, \"UV254\": %.4f}\r\n", 
-        Led_550, Led_254, Tem, pred_cod, pred_uv254);
+        "{\"Led_550\": %.6f, \"Led_254\": %.6f, \"Temp\": %.4f, \"COD\": %.4f, \"UV254\": %.4f,\"device_id\":%d,\"status\":\"%s\"}\r\n", 
+        Led_550, Led_254, Tem, pred_cod, pred_uv254,COMM_DEVICE_ID, "Active");
     
     HAL_UART_Transmit(&huart3, (uint8_t *)tx_buffer, len, 1000);
 
