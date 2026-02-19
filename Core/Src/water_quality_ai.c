@@ -1,6 +1,5 @@
 #include "water_quality_ai.h"
 #include <math.h>
-#include <stdio.h>
 
 // -------------------------------------------------------------------------
 // 包含权重文件
@@ -13,18 +12,13 @@
 // ------------------------------------------------------------
 
 /**
- * @brief ReLU 激活函数: f(x) = max(0, x)
+ * @brief tansig 激活函数（双曲正切）
  * @param data 数据数组指针
  * @param size 数组长度
  */
-static void float_relu(float *data, int size)
-{
-    for (int i = 0; i < size; i++)
-    {
-        if (data[i] < 0.0f)
-        {
-            data[i] = 0.0f;
-        }
+static void float_tansig(float* data, int size) {
+    for (int i = 0; i < size; i++) {
+        data[i] = tanhf(data[i]);
     }
 }
 
@@ -37,14 +31,11 @@ static void float_relu(float *data, int size)
  * @param rows    输出维度
  * @param cols    输入维度
  */
-static void layer_dense(const float *input, const float *weights, const float *bias, float *output, int rows, int cols)
-{
-    for (int i = 0; i < rows; i++)
-    {
+static void layer_dense(const float* input, const float* weights, const float* bias, float* output, int rows, int cols) {
+    for (int i = 0; i < rows; i++) {
         float sum = 0.0f;
         // 矩阵乘法: 累加 input[j] * weights[i, j]
-        for (int j = 0; j < cols; j++)
-        {
+        for (int j = 0; j < cols; j++) {
             // 注意: 这里的索引映射与 export_to_c.py 的导出顺序一致
             // PyTorch Linear权重默认是 [Out, In] (Row-Major flattening)
             sum += input[j] * weights[i * cols + j];
@@ -57,55 +48,56 @@ static void layer_dense(const float *input, const float *weights, const float *b
 // 核心接口实现
 // ------------------------------------------------------------
 
-void WaterQuality_Predict(float in_254, float in_550, float in_tem, float *out_cod, float *out_uv254)
-{
-    // 0. 定义临时缓冲区 (Layer buffer)
-    // 这些数组定义在栈上。
-    // 如果是 RAM 极小的单片机(如8051)，建议改为全局 static 变量复用内存
-    // 对于 STM32，栈空间通常足够 (这里总共约 32+16+2 个float，不到200字节)
-    float layer1_out[W1_ROWS]; // 隐藏层 1 输出 (32)
-    float layer2_out[W2_ROWS]; // 隐藏层 2 输出 (16)
-    float layer3_out[W3_ROWS]; // 输出层输出 (2)
-
-    // 1. 输入数据准备与标准化 (StandardScaler)
-    // 公式: x_new = (x - mean) / scale
-    float input_vec[3];
-
-    // INPUT_MEAN 和 INPUT_SCALE 定义在 model_data.h 中
-    input_vec[0] = (in_254 - INPUT_MEAN[0]) / INPUT_SCALE[0];
-    input_vec[1] = (in_550 - INPUT_MEAN[1]) / INPUT_SCALE[1];
-    input_vec[2] = (in_tem - INPUT_MEAN[2]) / INPUT_SCALE[2];
-
-    // 2. 第一层 FC (3 -> 32) + ReLU
-    layer_dense(input_vec, W1, B1, layer1_out, W1_ROWS, W1_COLS);
-    float_relu(layer1_out, W1_ROWS);
-
-    // 3. 第二层 FC (32 -> 16) + ReLU
-    layer_dense(layer1_out, W2, B2, layer2_out, W2_ROWS, W2_COLS);
-    float_relu(layer2_out, W2_ROWS);
-
-    // 4. 第三层 FC (16 -> 2)
-    // 根据模型设计，输出层不使用激活函数（线性输出）
-    layer_dense(layer2_out, W3, B3, layer3_out, W3_ROWS, W3_COLS);
-
-    // 5. 输出反标准化 (StandardScaler 反向)
-    // 公式: y_real = y_pred * scale + mean
-    // OUTPUT_SCALE 和 OUTPUT_MEAN 定义在 model_data.h 中
-    float pred_cod = layer3_out[0] * OUTPUT_SCALE[0] + OUTPUT_MEAN[0];
-    float pred_uv254 = layer3_out[1] * OUTPUT_SCALE[1] + OUTPUT_MEAN[1];
-
-    if (out_cod != 0)
-    {
-        *out_cod = pred_cod;
+void WaterQuality_Predict_Array(const float* input, float* out_values) {
+    if (input == 0 || out_values == 0) {
+        return;
     }
 
-    if (out_uv254 != 0)
-    {
-        *out_uv254 = pred_uv254;
+    // 0. 中间缓冲
+    float input_scaled[INPUT_SIZE];
+    float hidden[W1_ROWS];
+    float output_scaled[W2_ROWS];
+
+    // 1. 输入归一化 (MinMaxScaler)
+    // x_scaled = x * INPUT_SCALE + INPUT_MIN
+    for (int i = 0; i < INPUT_SIZE; i++) {
+        input_scaled[i] = input[i] * INPUT_SCALE[i] + INPUT_MIN[i];
     }
 
-    printf("--- AI Analysis Result ---\r\n");
-    printf("Input: 254nm=%.2f, 550nm=%.2f, Tem=%.1f\r\n", in_254, in_550, in_tem);
-    printf("Predict COD:   %.2f mg/L\r\n", pred_cod);
-    printf("Predict UV254: %.4f\r\n", pred_uv254);
+    // 2. 隐含层: FC1 + tansig
+    layer_dense(input_scaled, W1, B1, hidden, W1_ROWS, W1_COLS);
+    float_tansig(hidden, W1_ROWS);
+
+    // 3. 输出层: FC2 + purelin
+    layer_dense(hidden, W2, B2, output_scaled, W2_ROWS, W2_COLS);
+
+    // 4. 输出反归一化 (MinMaxScaler)
+    // y = (y_scaled - OUTPUT_MIN) / OUTPUT_SCALE
+    for (int i = 0; i < OUTPUT_SIZE; i++) {
+        if (OUTPUT_SCALE[i] == 0.0f) {
+            out_values[i] = 0.0f;
+        } else {
+            out_values[i] = (output_scaled[i] - OUTPUT_MIN[i]) / OUTPUT_SCALE[i];
+        }
+    }
+}
+
+void WaterQuality_Predict3(float in_0, float in_1, float in_2, float* out_values) {
+    float input[INPUT_SIZE] = {0.0f};
+    if (INPUT_SIZE > 0) input[0] = in_0;
+    if (INPUT_SIZE > 1) input[1] = in_1;
+    if (INPUT_SIZE > 2) input[2] = in_2;
+    WaterQuality_Predict_Array(input, out_values);
+}
+
+void WaterQuality_Predict(float in_254, float in_550, float in_tem, float* out_cod, float* out_uv254) {
+    float outputs[OUTPUT_SIZE];
+    WaterQuality_Predict3(in_254, in_550, in_tem, outputs);
+
+    if (out_cod != 0) {
+        *out_cod = (OUTPUT_SIZE > 0) ? outputs[0] : 0.0f;
+    }
+    if (out_uv254 != 0) {
+        *out_uv254 = (OUTPUT_SIZE > 1) ? outputs[1] : 0.0f;
+    }
 }
