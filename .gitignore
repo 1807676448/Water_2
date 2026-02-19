@@ -1,0 +1,32 @@
+# ===== Keil / MDK 输出与中间文件 =====
+MDK-ARM/build/
+MDK-ARM/Water_2/*.d
+MDK-ARM/Water_2/*.crf
+MDK-ARM/Water_2/*.o
+MDK-ARM/Water_2/*.axf
+MDK-ARM/Water_2/*.map
+MDK-ARM/Water_2/*.hex
+MDK-ARM/Water_2/*.bin
+MDK-ARM/Water_2/*.lst
+MDK-ARM/Water_2/*.lib
+MDK-ARM/Water_2/ExtDll.iex
+
+# ===== Keil 用户/本地配置 =====
+MDK-ARM/*.uvguix.*
+
+# ===== Python 虚拟环境与缓存 =====
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# ===== 通用日志与临时文件 =====
+*.log
+*.tmp
+*.bak
+*.swp
+
+# ===== VS Code 本地配置（按需） =====
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
