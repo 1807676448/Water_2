@@ -44,10 +44,11 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define RX_BUFFER_SIZE 64
-#define CMD_HEADER 0xAA                             // 包头
-#define CMD_TAIL 0x55                               // 包尾
-#define CMD_INSTR_SIZE 2                            // 指令长度
-#define CMD_TOTAL_SIZE (1 + CMD_INSTR_SIZE + 1 + 1) // 包头+指令+校验+包尾
+// 新调试指令格式: 0xAA 0xAA 0xBB 0xBB (4字节序列)
+#define DEBUG_CMD_BYTE0 0xAA
+#define DEBUG_CMD_BYTE1 0xAA
+#define DEBUG_CMD_BYTE2 0xBB
+#define DEBUG_CMD_BYTE3 0xBB
 
 ADS1220_HandleTypeDef hads1220;
 uint32_t adc_data;
@@ -60,18 +61,6 @@ uint8_t config_reg[4] = {
     VREF_AVDD | FIR_NONE | PSW_OPEN | IDAC_OFF,            // Config 2: 使用AVDD(3.3V)作为参考
     I1MUX_DISABLED | I2MUX_DISABLED | DRDY_ON_DRDY_ONLY    // Config 3: IDAC禁用
 };
-
-typedef enum
-{
-  CMD_STATE_WAIT_HEADER,
-  CMD_STATE_RECEIVE_INSTR,
-  CMD_STATE_RECEIVE_CHECKSUM,
-  CMD_STATE_RECEIVE_TAIL
-} cmd_state_t;
-
-static cmd_state_t usart3_cmd_state = CMD_STATE_WAIT_HEADER;
-static uint8_t usart3_cmd_index = 0;
-static uint8_t usart3_cmd_buffer[CMD_TOTAL_SIZE];
 
 float sensor_254_nm = 0.0f;
 float sensor_550_nm = 0.0f;
@@ -93,14 +82,29 @@ float result_uv254 = 0.0f;
 uint8_t usart3_rx_buffer[RX_BUFFER_SIZE];
 uint16_t usart3_rx_index = 0;
 uint8_t usart3_rx_complete = 0;
+uint8_t cmd_rx_state = 0;  // 新指令状态: 0=等AA1, 1=等AA2, 2=等BB1, 3=等BB2
+uint8_t cmd_toggle_state = 0;  // 调试切换指令: 0=等CC1, 1=等CC2, 2=等CC3
+uint8_t cmd_mute_state = 0;    // 静默指令: 0=等DD1, 1=等DD2, 2=等DD3
+uint8_t cmd_unmute_state = 0;  // 恢复指令: 0=等EE1, 1=等EE2, 2=等EE3
+
+uint8_t tx_muted = 0;  // 0=允许USART3发送, 1=静默(遥控系统占用信道时禁止发送)
 
 // USART1接收相关变量 (新增)
 uint8_t usart1_rx_buffer[1];
 
 uint8_t TestStart = 0;
 
+uint8_t debug_mode = 0;  // 0=正常模式(周期检测), 1=调试模式(指令触发检测)
+
 uint64_t tick_counter = 0;
 uint64_t tick_heart = 0;
+
+// 初始水泵控制（非阻塞10秒）
+uint8_t initial_pump_done = 0;
+uint64_t tick_initial_pump = 0;
+
+// 总线空闲检测：记录最后一次收到字节的时刻
+uint64_t tick_last_rx = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -166,14 +170,17 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
 
-  HAL_GPIO_WritePin(Boom_GPIO_Port, Boom_Pin, GPIO_PIN_RESET);
+  // 初始化完成后开启水泵（非阻塞），10秒后自动关闭
+  HAL_GPIO_WritePin(Boom_GPIO_Port, Boom_Pin, GPIO_PIN_SET);
+  tick_initial_pump = HAL_GetTick();
+  initial_pump_done = 0;
 
   ADS1220_InitStruct(&hads1220, &hspi1); // 初始化ADS1220
   ADS1220_Reset(&hads1220);              // 复位ADS1220
   HAL_Delay(10);
   ADS1220_WriteRegisters(&hads1220, 0, 4, config_reg); // 配置寄存器
   HAL_Delay(1);
-  ADS1220_DebugPrintRegisters(&hads1220); // 打印初始配置
+  // ADS1220_DebugPrintRegisters(&hads1220); // 打印初始配置 (已注释，避免占用信道)
 
   // 启动USART3中断接收
   usart3_rx_index = 0;
@@ -197,35 +204,49 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-    // HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-    // HAL_Delay(400);
-    // if (TestStart == 1)
+    // 非阻塞检查：初始水泵运行10秒后关闭
+    if (!initial_pump_done && (HAL_GetTick() - tick_initial_pump >= 5000))
+    {
+      HAL_GPIO_WritePin(Boom_GPIO_Port, Boom_Pin, GPIO_PIN_RESET);
+      initial_pump_done = 1;
+    }
+
+    if (debug_mode)
+    {
+      // 调试模式：由串口指令触发单次检测
+      if (TestStart)
+      {
+        BoomTest(0, 0);
+        TestStart = 0;
+      }
+    }
+    else
+    {
+      // 正常模式：每10秒周期检测
+      if (HAL_GetTick() - tick_counter > 10000)
+      {
+        BoomTest(0, 0);
+        tick_counter = HAL_GetTick();
+        HAL_Delay(200);
+      }
+    }
+
+    // 心跳包已注释，仅保留数据上传，避免占用信道
+    // if (!debug_mode)
     // {
-    //   BoomTest(0, 0);
-    //   TestStart = 0;
-    //   HAL_Delay(200);
+    //   if (HAL_GetTick() - tick_heart > 1000)
+    //   {
+    //     tick_heart = HAL_GetTick();
+    //     char tx_buffer_1[80];
+    //
+    //     int len = snprintf(tx_buffer_1, sizeof(tx_buffer_1),
+    //                        "{\"device_id\":%d,\"status\":\"%s\"}\r\n",
+    //                        COMM_DEVICE_ID, "online");
+    //
+    //     HAL_UART_Transmit(&huart3, (uint8_t *)tx_buffer_1, len, 1000);
+    //   }
     // }
-    if (HAL_GetTick() - tick_counter > 10000)
-    {
-      BoomTest(0, 0);
-      tick_counter = HAL_GetTick();
-      HAL_Delay(200);
-    }
-
-    if (HAL_GetTick() - tick_heart > 1000)
-    {
-      tick_heart = HAL_GetTick();
-      char tx_buffer_1[80];
-
-      int len = snprintf(tx_buffer_1, sizeof(tx_buffer_1),
-                         "{\"device_id\":%d,\"status\":\"%s\"}\r\n",
-                         COMM_DEVICE_ID, "Active");
-
-      HAL_UART_Transmit(&huart3, (uint8_t *)tx_buffer_1, len, 1000);
-      HAL_Delay(100);
-    }
-    printf("%u\r\n", (unsigned int)tick_counter);
-    BoardLedTest();
+    // BoardLedTest();
     HAL_Delay(200);
   }
   /* USER CODE END 3 */
@@ -285,42 +306,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   // 判断中断是否来自 TIM6
   if (htim->Instance == TIM6)
   {
-    printf("%f\n\r", DS18B20_Get_Temp());
-  }
-}
-
-static uint8_t calculate_checksum(uint8_t *data, uint8_t len)
-{
-  uint8_t checksum = 0;
-  for (uint8_t i = 0; i < len; i++)
-  {
-    checksum ^= data[i];
-  }
-  return checksum;
-}
-// 命令处理函数
-static void process_command(uint8_t *cmd_buffer)
-{
-  // 提取指令部分（跳过包头）
-  uint8_t *instruction = &cmd_buffer[1];
-
-  // 计算校验和
-  uint8_t received_checksum = cmd_buffer[CMD_TOTAL_SIZE - 2]; // 校验位位置
-  uint8_t calculated_checksum = calculate_checksum(instruction, CMD_INSTR_SIZE);
-
-  // 验证校验和
-  if (received_checksum == calculated_checksum)
-  {
-    TestStart = 1; // 设置标志位
-    // 可选：通过串口回传确认信息
-    // uint8_t ack_msg[] = "Command executed: BoomTest\r\n";
-    // HAL_UART_Transmit_IT(&huart3, ack_msg, sizeof(ack_msg) - 1);
-  }
-  else
-  {
-    // 校验失败
-    uint8_t error_msg[] = "Checksum error\r\n";
-    HAL_UART_Transmit_IT(&huart3, error_msg, sizeof(error_msg) - 1);
+    // printf("%f\n\r", DS18B20_Get_Temp()); // 已注释，避免占用信道
   }
 }
 
@@ -328,56 +314,115 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if (huart->Instance == USART3)
   {
+    tick_last_rx = HAL_GetTick();  // 更新最后收到字节的时刻
     uint8_t received_byte = usart3_rx_buffer[usart3_rx_index];
-    switch (usart3_cmd_state)
+
+    // 新指令格式: 0xAA 0xAA 0xBB 0xBB (4字节序列状态机, 全内联)
+    switch (cmd_rx_state)
     {
-    case CMD_STATE_WAIT_HEADER:
-      if (received_byte == CMD_HEADER)
+    case 0:  // 等待第一个 0xAA
+      if (received_byte == DEBUG_CMD_BYTE0)
       {
-        usart3_cmd_buffer[0] = received_byte; // 存储包头
-        usart3_cmd_index = 1;
-        usart3_cmd_state = CMD_STATE_RECEIVE_INSTR;
+        cmd_rx_state = 1;
       }
       break;
 
-    case CMD_STATE_RECEIVE_INSTR:
-      if (usart3_cmd_index < (1 + CMD_INSTR_SIZE))
+    case 1:  // 等待第二个 0xAA
+      if (received_byte == DEBUG_CMD_BYTE1)
       {
-        usart3_cmd_buffer[usart3_cmd_index] = received_byte;
-        usart3_cmd_index++;
-
-        // 指令接收完成
-        if (usart3_cmd_index == (1 + CMD_INSTR_SIZE))
-        {
-          usart3_cmd_state = CMD_STATE_RECEIVE_CHECKSUM;
-        }
-      }
-      break;
-
-    case CMD_STATE_RECEIVE_CHECKSUM:
-      usart3_cmd_buffer[usart3_cmd_index] = received_byte;
-      usart3_cmd_index++;
-      usart3_cmd_state = CMD_STATE_RECEIVE_TAIL;
-      break;
-
-    case CMD_STATE_RECEIVE_TAIL:
-      if (received_byte == CMD_TAIL)
-      {
-        usart3_cmd_buffer[usart3_cmd_index] = received_byte;
-
-        // 完整命令接收完成，处理命令
-        process_command(usart3_cmd_buffer);
-
-        // 重置状态机
-        usart3_cmd_state = CMD_STATE_WAIT_HEADER;
-        usart3_cmd_index = 0;
+        cmd_rx_state = 2;
       }
       else
       {
-        // 包尾错误，重置状态机
-        usart3_cmd_state = CMD_STATE_WAIT_HEADER;
-        usart3_cmd_index = 0;
+        cmd_rx_state = 0;
       }
+      break;
+
+    case 2:  // 等待第一个 0xBB
+      if (received_byte == DEBUG_CMD_BYTE2)
+      {
+        cmd_rx_state = 3;
+      }
+      else
+      {
+        cmd_rx_state = 0;
+      }
+      break;
+
+    case 3:  // 等待第二个 0xBB → 指令完成
+      if (received_byte == DEBUG_CMD_BYTE3)
+      {
+        TestStart = 1;   // 触发单次检测
+      }
+      cmd_rx_state = 0;  // 无论匹配与否, 均重置状态
+      break;
+    }
+
+    // 调试模式切换指令: 0xCC 0xCC 0xCC (3字节序列)
+    switch (cmd_toggle_state)
+    {
+    case 0:  // 等待第一个 0xCC
+      if (received_byte == 0xCC)
+      {
+        cmd_toggle_state = 1;
+      }
+      break;
+
+    case 1:  // 等待第二个 0xCC
+      if (received_byte == 0xCC)
+      {
+        cmd_toggle_state = 2;
+      }
+      else
+      {
+        cmd_toggle_state = 0;
+      }
+      break;
+
+    case 2:  // 等待第三个 0xCC → 指令完成
+      if (received_byte == 0xCC)
+      {
+        debug_mode = !debug_mode;  // 切换调试模式
+        // 调试模式切换回传已注释，仅保留数据上传，避免占用信道
+        // char toggle_msg[64];
+        // int toggle_len = snprintf(toggle_msg, sizeof(toggle_msg),
+        //     "{\"device_id\":%d,\"debug_mode\":%d}\r\n",
+        //     COMM_DEVICE_ID, debug_mode);
+        // HAL_UART_Transmit(&huart3, (uint8_t *)toggle_msg, toggle_len, 1000);
+      }
+      cmd_toggle_state = 0;
+      break;
+    }
+
+    // 静默开启指令: 0xDD 0xDD 0xDD (遥控系统启动时发出)
+    switch (cmd_mute_state)
+    {
+    case 0:
+      if (received_byte == 0xDD) { cmd_mute_state = 1; }
+      break;
+    case 1:
+      if (received_byte == 0xDD) { cmd_mute_state = 2; }
+      else { cmd_mute_state = 0; }
+      break;
+    case 2:
+      if (received_byte == 0xDD) { tx_muted = 1; }
+      cmd_mute_state = 0;
+      break;
+    }
+
+    // 静默关闭指令: 0xEE 0xEE 0xEE (遥控系统退出时发出)
+    switch (cmd_unmute_state)
+    {
+    case 0:
+      if (received_byte == 0xEE) { cmd_unmute_state = 1; }
+      break;
+    case 1:
+      if (received_byte == 0xEE) { cmd_unmute_state = 2; }
+      else { cmd_unmute_state = 0; }
+      break;
+    case 2:
+      if (received_byte == 0xEE) { tx_muted = 0; }
+      cmd_unmute_state = 0;
       break;
     }
 

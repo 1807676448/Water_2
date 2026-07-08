@@ -380,11 +380,10 @@ int32_t ADS1220_ReadConvertOnce(ADS1220_HandleTypeDef *handle, uint8_t chl)
   */
 void ADS1220_DebugPrint(int32_t data)
 {
-    // 计算电压 (假设 VREF=2.048V, Gain=1)
-    float voltage = ((float)data / 8388608.0f) * 3.3f;
-    
-    printf("ADS1220 Raw: 0x%06X (%d), Voltage: %.6f V\r\n", 
-           (unsigned int)(data & 0x00FFFFFF), (int)data, voltage);
+    // 调试打印已注释，避免占用信道
+    // float voltage = ((float)data / 8388608.0f) * 3.3f;
+    // printf("ADS1220 Raw: 0x%06X (%d), Voltage: %.6f V\r\n", 
+    //        (unsigned int)(data & 0x00FFFFFF), (int)data, voltage);
 }
 
 /**
@@ -394,19 +393,18 @@ void ADS1220_DebugPrint(int32_t data)
   */
 void ADS1220_DebugPrintRegisters(ADS1220_HandleTypeDef *handle)
 {
-    uint8_t reg_values[4] = {0};
-    
-    // 读取所有配置寄存器
-    if (ADS1220_OK == ADS1220_ReadRegisters(handle, 0, 4, reg_values))
-    {
-        printf("ADS1220:\r\n");
-        printf("  CONFIG0: 0x%02X\r\n", reg_values[0]);
-        printf("  CONFIG1: 0x%02X\r\n", reg_values[1]);
-        printf("  CONFIG2: 0x%02X\r\n", reg_values[2]);
-        printf("  CONFIG3: 0x%02X\r\n", reg_values[3]);
-    }
-    else
-    {
-        printf("ads1220 error\r\n");
-    }
+    // 寄存器打印已注释，避免占用信道
+    // uint8_t reg_values[4] = {0};
+    // if (ADS1220_OK == ADS1220_ReadRegisters(handle, 0, 4, reg_values))
+    // {
+    //     printf("ADS1220:\r\n");
+    //     printf("  CONFIG0: 0x%02X\r\n", reg_values[0]);
+    //     printf("  CONFIG1: 0x%02X\r\n", reg_values[1]);
+    //     printf("  CONFIG2: 0x%02X\r\n", reg_values[2]);
+    //     printf("  CONFIG3: 0x%02X\r\n", reg_values[3]);
+    // }
+    // else
+    // {
+    //     printf("ads1220 error\r\n");
+    // }
 }

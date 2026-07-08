@@ -14,9 +14,9 @@
 
 extern ADS1220_HandleTypeDef hads1220;
 
-#define LedDelayTime 150
+#define LedDelayTime 80
 
-uint32_t led254_blink(uint16_t time);
-uint32_t led550_blink(uint16_t time);
+int32_t led254_blink(uint16_t time);
+int32_t led550_blink(uint16_t time);
 
 #endif

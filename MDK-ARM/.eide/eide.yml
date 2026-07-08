@@ -88,6 +88,8 @@ targets:
         - RTE/_Water_2
       libList: []
     excludeList: []
+    settings:
+      debugger: cortex-debug
     toolchain: AC6
     toolchainConfigMap:
       AC5:
